@@ -715,13 +715,13 @@ ifndef NO_NYX
 endif
 endif
 	-cd qemu_mode && sh ./build_qemu_support.sh
-  ifeq "$(ARCH)" "aarch64"
-    ifndef NO_UNICORN_ARM64
-	-cd unicorn_mode && unset CFLAGS && sh ./build_unicorn_support.sh
-    endif
-  else
-	-cd unicorn_mode && unset CFLAGS && sh ./build_unicorn_support.sh
-  endif
+#  ifeq "$(ARCH)" "aarch64"
+#    ifndef NO_UNICORN_ARM64
+#	-cd unicorn_mode && unset CFLAGS && sh ./build_unicorn_support.sh
+#    endif
+#  else
+#	-cd unicorn_mode && unset CFLAGS && sh ./build_unicorn_support.sh
+#  endif
 endif
 
 .PHONY: binary-only
