@@ -880,6 +880,13 @@ typedef struct afl_state {
 
   s64 last_scored_idx;           /* Index of the last queue entry re-scored */
 
+  u8 *wrapper_file; /* FSmode added*/
+  u8* seed_file;
+  u8* image_file;
+  u8* syscall_dir;
+  u32 fsfuzz_mode;
+  u32 meta_size;
+
 #ifdef INTROSPECTION
   char  mutation[8072];
   char  m_tmp[4096];
