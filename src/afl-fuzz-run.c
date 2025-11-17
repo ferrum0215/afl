@@ -30,6 +30,7 @@
 #include <signal.h>
 #include <limits.h>
 #include <glob.h>
+#include <dlfcn.h>
 #if !defined NAME_MAX
   #define NAME_MAX _XOPEN_NAME_MAX
 #endif
@@ -120,7 +121,22 @@ u32 __attribute__((hot)) write_to_testcase(afl_state_t *afl, void **mem,
 
   u8 sent = 0;
 
-  if (unlikely(afl->custom_mutators_count)) {
+  if (afl->fsfuzz_mode) {
+    void *wrapper_dh;
+    void (*wrapper_decompress)(void *meta_buffer, size_t meta_len, bool checksum);
+
+    wrapper_dh = dlopen(afl->wrapper_file, RTLD_NOW);
+    wrapper_decompress = dlsym(wrapper_dh, "decompress");
+
+    u8     *new_mem = *mem;
+    size_t meta_size_ = (size_t) afl->meta_size;
+    wrapper_decompress(new_mem, meta_size_, 1);
+
+    memcpy(afl->fsrv.shmem_fuzz, (char *)new_mem + meta_size_, len);
+    //s32 fd = afl->fsrv.out_fd;
+    //ck_write(fd, (char *)new_mem + meta_size_, len - meta_size_, afl->fsrv.out_file); 
+    //close(fd);
+  } else if (unlikely(afl->custom_mutators_count)) {
 
     ssize_t new_size = len;
     u8     *new_mem = *mem;
