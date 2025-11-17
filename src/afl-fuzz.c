@@ -31,6 +31,14 @@
 #include "common.h"
 #include <limits.h>
 #include <stdlib.h>
+#include <dlfcn.h>
+
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <sys/file.h>
+#include <sys/sendfile.h>
+
 #ifndef USEMMAP
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -669,10 +677,23 @@ int main(int argc, char **argv_orig, char **envp) {
   // still available: HjJkKqrv
   while (
       (opt = getopt(argc, argv,
-                    "+a:Ab:B:c:CdDe:E:f:F:g:G:hi:I:l:L:m:M:nNo:Op:P:QRs:S:t:T:"
+                    "+a:Ab:B:c:CdDe:E:f:F:g:G:hi:I:j:k:l:L:m:M:nNo:Op:P:Qr:Rs:S:t:T:"
                     "uUV:w:WXx:YzZ")) > 0) {
 
     switch (opt) {
+
+      case 'r':
+        afl->wrapper_file = optarg;
+        afl->fsfuzz_mode = 1;
+        break;
+      
+      case 'j':
+        afl->seed_file = optarg;
+        break;
+
+      case 'k':
+        afl->image_file = optarg;
+        break;
 
       case 'a':
 
@@ -823,6 +844,7 @@ int main(int argc, char **argv_orig, char **envp) {
         if (optarg == NULL) { FATAL("No valid seed provided. Got NULL."); }
         rand_set_seed(afl, strtoul(optarg, 0L, 10));
         afl->fixed_seed = 1;
+        afl->syscall_dir = optarg;
         break;
 
       }
@@ -2111,6 +2133,69 @@ int main(int argc, char **argv_orig, char **envp) {
   get_core_count(afl);
 
   atexit(at_exit);
+
+  if(afl->fsfuzz_mode) {
+    void *wrapper_dh;
+    void (*wrapper_compress)(char *in_path, char *out_path, char *meta_path);
+    wrapper_dh = dlopen(afl->wrapper_file, RTLD_NOW);
+    if (!wrapper_dh) {
+      PFATAL("dlopen() error");
+    }
+    wrapper_compress = dlsym(wrapper_dh, "compress");
+
+    struct dirent **nl;
+    struct stat st;
+    s32 nl_cnt;
+    s32 i;
+
+    nl_cnt = scandir(afl->syscall_dir, &nl, NULL, alphasort);
+
+    u8* fn = alloc_printf("%s/seed.meta", afl->in_dir);
+    lstat(afl->seed_file, &st);
+    void* buffer = mmap(NULL, st.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    wrapper_compress(afl->seed_file, buffer, fn); 
+    ck_free(fn);
+
+    u8* seed_meta_fn = alloc_printf("%s/seed.meta", afl->in_dir);
+    lstat(seed_meta_fn, &st);
+    afl->meta_size = st.st_size;
+
+    int meta_fd = open(seed_meta_fn, O_RDONLY);
+
+    for (i = 0; i < nl_cnt; i++) {
+
+        u8 *syscall_fn = alloc_printf("%s/%s", afl->syscall_dir, nl[i]->d_name);
+        if (lstat(syscall_fn, &st) || access(syscall_fn, R_OK))
+            PFATAL("Unable to access '%s'", syscall_fn);
+
+        /* This also takes care of . and .. */
+        if (!S_ISREG(st.st_mode) || !st.st_size || strstr(syscall_fn, "/README.txt")) {
+            ck_free(syscall_fn);
+            continue;
+        }
+
+        int syscall_fd = open(syscall_fn, O_RDONLY);
+
+        u8 *testcase_fn = alloc_printf("%s/%s", afl->in_dir, nl[i]->d_name);
+        int testcase_fd = open(testcase_fn, O_RDWR | O_CREAT | O_EXCL, 0666);
+
+        lseek(meta_fd, 0, SEEK_SET);
+        sendfile(testcase_fd, meta_fd, NULL, afl->meta_size);
+        sendfile(testcase_fd, syscall_fd, NULL, st.st_size);
+
+        close(testcase_fd);
+        close(syscall_fd);
+
+        ck_free(testcase_fn);
+        ck_free(syscall_fn);
+
+        free(nl[i]);
+
+    }
+
+    close(meta_fd);
+    ck_free(seed_meta_fn);
+  }
 
   setup_dirs_fds(afl);
 
