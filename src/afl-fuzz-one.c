@@ -28,6 +28,7 @@
 #include <limits.h>
 #include "cmplog.h"
 #include "afl-mutations.h"
+#include "../../combined/mutator_wrapper.hpp"
 
 /* MOpt */
 
@@ -330,8 +331,9 @@ u8 fuzz_one_original(afl_state_t *afl) {
   u32 j;
   u32 i;
   u8 *in_buf, *out_buf, *orig_in, *ex_tmp;
-  u64 havoc_queued = 0, orig_hit_cnt, new_hit_cnt = 0, prev_cksum, _prev_cksum;
-  u32 splice_cycle = 0, perf_score = 100, orig_perf;
+  u64 havoc_queued = 0, orig_hit_cnt, new_hit_cnt = 0;
+  u32 splice_cycle = 0, perf_score = 100, orig_perf, prev_cksum, _prev_cksum;
+  u32 orig_queued_with_cov;
 
   u8 ret_val = 1, doing_det = 0;
 
@@ -473,7 +475,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
    * TRIMMING *
    ************/
 
-  if (unlikely(!afl->non_instrumented_mode && !afl->queue_cur->trim_done &&
+  if (unlikely(!afl->fsfuzz_mode && !afl->non_instrumented_mode && !afl->queue_cur->trim_done &&
                !afl->disable_trim)) {
 
     u32 old_len = afl->queue_cur->len;
@@ -631,7 +633,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
 
-  prev_cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+  prev_cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
   _prev_cksum = prev_cksum;
 
   /* Now flip bits. */
@@ -684,7 +686,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     if (!afl->non_instrumented_mode && (afl->stage_cur & 7) == 7) {
 
-      u64 cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+      u32 cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       if (afl->stage_cur == afl->stage_max - 1 && cksum == prev_cksum) {
 
@@ -2034,9 +2036,11 @@ havoc_stage:
 
   if (unlikely(afl->stage_max < HAVOC_MIN)) { afl->stage_max = HAVOC_MIN; }
 
-  temp_len = len;
+  temp_len = afl->fsfuzz_mode ? afl->meta_size : len;
 
   orig_hit_cnt = afl->queued_items + afl->saved_crashes;
+
+  orig_queued_with_cov = afl->queued_with_cov;
 
   havoc_queued = afl->queued_items;
 
@@ -3329,6 +3333,11 @@ havoc_stage:
 
   }
 
+  if (afl->queued_with_cov > orig_queued_with_cov)
+    goto ret;
+  else
+    goto fsfuzz_stage;
+
 #ifndef IGNORE_FINDS
 
   /************
@@ -3342,7 +3351,7 @@ havoc_stage:
 
 retry_splicing:
 
-  if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
+  if (!afl->fsfuzz_mode && afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
 
     struct queue_entry *target;
@@ -3405,6 +3414,81 @@ retry_splicing:
   }
 
 #endif                                                     /* !IGNORE_FINDS */
+fsfuzz_stage:
+
+  /** 
+  * havoc
+  */
+
+  afl->stage_name = "fs-havoc-mutate";
+  afl->stage_short = "fs-havoc-mutate";
+  afl->stage_max = MUTATE_HAVOC_CYCLES * perf_score / afl->havoc_div / 100;
+  if (afl->stage_max < HAVOC_MIN) afl->stage_max = HAVOC_MIN;
+
+  mutate_havoc_init(out_buf, len, afl->stage_max);
+
+  afl->stage_val_type = STAGE_VAL_NONE;
+  u32 init_queued = afl->queued_items;
+  u32 fsfuzz_queued = afl->queued_items;
+
+  u8* new_buf = (u8*)ck_alloc(afl->meta_size + MAX_FILE);
+  memcpy(new_buf, out_buf, len + afl->meta_size);
+  u32 fs_buf_len = 0;
+
+  for(afl->stage_cur = 0; afl->stage_cur < afl->stage_max; afl->stage_cur++) {
+
+    fs_buf_len = mutate_havoc(new_buf + afl->meta_size, MAX_FILE, MUTATE);
+
+    if (common_fuzz_stuff(afl, new_buf, afl->meta_size + fs_buf_len)) goto abandon_entry;
+
+    if (afl->queued_items != fsfuzz_queued) {
+
+      if (perf_score <= HAVOC_MAX_MULT * 100) {
+        afl->stage_max  *= 2;
+        perf_score *= 2;
+      }
+
+      fsfuzz_queued = afl->queued_items;
+
+    }
+
+  }
+
+  if (afl->queued_items > init_queued)
+    goto fsfuzz_fini;
+
+  afl->stage_name = "fs-havoc-generate";
+  afl->stage_short = "fs-havoc-generate";
+  afl->stage_max = GENERATE_HAVOC_CYCLES * perf_score / afl->havoc_div / 100;
+  if (afl->stage_max < HAVOC_MIN) afl->stage_max = HAVOC_MIN;
+
+  afl->stage_val_type = STAGE_VAL_NONE;
+
+  for(afl->stage_cur = 0; afl->stage_cur < afl->stage_max; afl->stage_cur++) {
+
+    fs_buf_len = mutate_havoc(new_buf + afl->meta_size, MAX_FILE, GENERATE);
+
+    if (common_fuzz_stuff(afl, new_buf, afl->meta_size + fs_buf_len)) goto abandon_entry;
+
+    if (afl->queued_items != fsfuzz_queued) {
+
+      if (perf_score <= HAVOC_MAX_MULT * 100) {
+        afl->stage_max  *= 2;
+        perf_score *= 2;
+      }
+
+      fsfuzz_queued = afl->queued_items;
+
+    }
+
+  }
+
+fsfuzz_fini:
+
+  ck_free(new_buf);
+  mutate_havoc_fini();
+
+ret:
 
   ret_val = 0;
 
@@ -3725,7 +3809,7 @@ static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
   if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
 
-  prev_cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+  prev_cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
   _prev_cksum = prev_cksum;
 
   /* Now flip bits. */
@@ -3773,7 +3857,7 @@ static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
     if (!afl->non_instrumented_mode && (afl->stage_cur & 7) == 7) {
 
-      u64 cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+      u64 cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       if (afl->stage_cur == afl->stage_max - 1 && cksum == prev_cksum) {
 
@@ -3972,7 +4056,7 @@ static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
       if (!afl->non_instrumented_mode && len >= EFF_MIN_LEN) {
 
-        cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+        cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       } else {
 
@@ -5803,6 +5887,7 @@ pacemaker_fuzzing:
         }
 
       }
+
 
 #ifndef IGNORE_FINDS
 
