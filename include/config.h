@@ -210,6 +210,9 @@
 
 /* Baseline number of random tweaks during a single 'havoc' stage: */
 
+#define MUTATE_HAVOC_CYCLES    128 // 256, for fs, let's mutate less
+#define GENERATE_HAVOC_CYCLES  64 // 256, for fs, let's mutate less
+
 #define HAVOC_CYCLES 256U
 #define HAVOC_CYCLES_INIT 1024U
 
