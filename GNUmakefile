@@ -480,8 +480,19 @@ src/afl-forkserver.o: $(COMM_HDR) src/afl-forkserver.c
 src/afl-sharedmem.o: $(COMM_HDR) src/afl-sharedmem.c include/android-ashmem.h include/cmplog.h
 	$(CC) $(CFLAGS) $(CFLAGS_FLTO) $(SPECIAL_PERFORMANCE) -c src/afl-sharedmem.c -o src/afl-sharedmem.o
 
-afl-fuzz: $(COMM_HDR) include/afl-fuzz.h $(AFL_FUZZ_FILES) src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o include/cmplog.h include/envs.h | test_x86
-	$(CC) $(CFLAGS) $(COMPILE_STATIC) $(CFLAGS_FLTO) $(SPECIAL_PERFORMANCE) $(AFL_FUZZ_FILES) src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o -o $@ $(PYFLAGS) $(LDFLAGS) -lm
+
+
+FUZZ_HELP_PATH = ../combined
+FUZZ_ONE_SRC = $(FUZZ_HELP_PATH)/mutator_wrapper.cpp $(FUZZ_HELP_PATH)/MutationStage.cpp $(FUZZ_HELP_PATH)/Program.cpp $(FUZZ_HELP_PATH)/Utils.cpp $(FUZZ_HELP_PATH)/Constants.cpp $(FUZZ_HELP_PATH)/Image.cpp $(FUZZ_HELP_PATH)/SyscallMutator.cpp
+FUZZ_ONE_OBJS = $(patsubst %.cpp, %.o, $(FUZZ_ONE_SRC))
+FUZZ_ONE_HDR = $(FUZZ_HELP_PATH)/SyscallMutator.hpp $(FUZZ_HELP_PATH)/Program.hpp $(FUZZ_HELP_PATH)/MutationStage.hpp 
+FUZZ_ONE_LIB = fuzz_one.a
+
+$(FUZZ_ONE_LIB): $(FUZZ_ONE_OBJS)
+	ar rcs $@ $^
+
+afl-fuzz: $(FUZZ_ONE_LIB) $(COMM_HDR) include/afl-fuzz.h $(AFL_FUZZ_FILES) $(FUZZ_ONE_HDR) src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o include/cmplog.h include/envs.h | test_x86
+	$(CC) $(CFLAGS) $(COMPILE_STATIC) $(CFLAGS_FLTO) $(SPECIAL_PERFORMANCE) $(AFL_FUZZ_FILES) src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o $(FUZZ_ONE_LIB) -o $@ $(PYFLAGS) $(LDFLAGS) -lm -lstdc++
 ifdef IS_IOS
 	@ldid -Sentitlements.plist $@ && echo "[+] Signed $@" || { echo "[-] Failed to sign $@"; }
 endif
@@ -663,6 +674,7 @@ clean:
 	-$(MAKE) -C qemu_mode/libqasan clean
 	-$(MAKE) -C frida_mode clean
 	rm -rf nyx_mode/packer/linux_initramfs/init.cpio.gz nyx_mode/libnyx/libnyx/target/release/* nyx_mode/QEMU-Nyx/x86_64-softmmu/qemu-system-x86_64
+	rm -f $(FUZZ_ONE_LIB)
 ifeq "$(IN_REPO)" "1"
 	-test -e coresight_mode/coresight-trace/Makefile && $(MAKE) -C coresight_mode/coresight-trace clean || true
 	-test -e qemu_mode/qemuafl/Makefile && $(MAKE) -C qemu_mode/qemuafl clean || true
