@@ -132,10 +132,19 @@ u32 __attribute__((hot)) write_to_testcase(afl_state_t *afl, void **mem,
     size_t meta_size_ = (size_t) afl->meta_size;
     wrapper_decompress(new_mem, meta_size_, 1);
 
-    memcpy(afl->fsrv.shmem_fuzz, (char *)new_mem + meta_size_, len);
-    //s32 fd = afl->fsrv.out_fd;
-    //ck_write(fd, (char *)new_mem + meta_size_, len - meta_size_, afl->fsrv.out_file); 
-    //close(fd);
+    unlink(afl->fsrv.out_file);
+    s32 fd = open(afl->fsrv.out_file, O_WRONLY | O_CREAT | O_EXCL, afl->perm);
+
+    if (meta_size_ > len) {
+      //memcpy(afl->fsrv.shmem_fuzz, (char *)new_mem + meta_size_, len);
+      ck_write(fd, (char *)new_mem + meta_size_, len, afl->fsrv.out_file); 
+    }
+    else {
+      //memcpy(afl->fsrv.shmem_fuzz, (char *)new_mem + meta_size_, len - meta_size_);
+      ck_write(fd, (char *)new_mem + meta_size_, len - meta_size_, afl->fsrv.out_file); 
+    }
+    
+    close(fd);
   } else if (unlikely(afl->custom_mutators_count)) {
 
     ssize_t new_size = len;

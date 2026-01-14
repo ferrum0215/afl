@@ -672,7 +672,7 @@ int main(int argc, char **argv_orig, char **envp) {
   gettimeofday(&tv, &tz);
   rand_set_seed(afl, tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  afl->shmem_testcase_mode = 1;  // we always try to perform shmem fuzzing
+  afl->shmem_testcase_mode = 0;  // we always try to perform shmem fuzzing
 
   // still available: HjJkKqrv
   while (
@@ -2153,7 +2153,7 @@ int main(int argc, char **argv_orig, char **envp) {
     u8* fn = alloc_printf("%s/seed.meta", afl->in_dir);
     lstat(afl->seed_file, &st);
     void* buffer = mmap(NULL, st.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    wrapper_compress(afl->seed_file, buffer, fn); 
+    wrapper_compress(afl->seed_file, buffer, fn);
     ck_free(fn);
 
     u8* seed_meta_fn = alloc_printf("%s/seed.meta", afl->in_dir);
@@ -2194,6 +2194,7 @@ int main(int argc, char **argv_orig, char **envp) {
     }
 
     close(meta_fd);
+    unlink(seed_meta_fn);
     ck_free(seed_meta_fn);
   }
 
@@ -2560,6 +2561,8 @@ int main(int argc, char **argv_orig, char **envp) {
 
         detect_file_args(argv + optind + 1, afl->fsrv.out_file,
                          &afl->fsrv.use_stdin);
+
+        setup_stdio_file(afl);
         break;
 
       }

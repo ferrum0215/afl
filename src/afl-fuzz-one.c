@@ -2641,7 +2641,7 @@ havoc_stage:
         case MUT_OVERWRITE_FIXED: {
 
           /* Overwrite bytes with fixed bytes. */
-
+          
           if (unlikely(temp_len < 2)) { break; }  // no retry
 
           u32 copy_len = choose_block_len(afl, temp_len - 1);
@@ -2657,7 +2657,7 @@ havoc_stage:
           strcat(afl->mutation, afl->m_tmp);
 #endif
           memset(out_buf + copy_to, item, copy_len);
-
+          
           break;
 
         }
@@ -3285,15 +3285,15 @@ havoc_stage:
 
     }
 
-    if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
+    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
 
     /* out_buf might have been mangled a bit, so let's restore it to its
        original size and shape. */
 
-    out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
-    if (unlikely(!out_buf)) { PFATAL("alloc"); }
-    temp_len = len;
-    memcpy(out_buf, in_buf, len);
+    //out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
+    //if (unlikely(!out_buf)) { PFATAL("alloc"); }
+    //temp_len = len;
+    memcpy(out_buf, in_buf, temp_len);
 
     /* If we're finding new stuff, let's run for a bit longer, limits
        permitting. */
@@ -3425,7 +3425,9 @@ fsfuzz_stage:
   afl->stage_max = MUTATE_HAVOC_CYCLES * perf_score / afl->havoc_div / 100;
   if (afl->stage_max < HAVOC_MIN) afl->stage_max = HAVOC_MIN;
 
-  mutate_havoc_init(out_buf, len, afl->stage_max);
+  if (len >= afl->meta_size) len = len - afl->meta_size;
+  
+  mutate_havoc_init(out_buf + afl->meta_size, len, afl->stage_max);
 
   afl->stage_val_type = STAGE_VAL_NONE;
   u32 init_queued = afl->queued_items;
