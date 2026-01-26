@@ -2562,7 +2562,6 @@ int main(int argc, char **argv_orig, char **envp) {
         detect_file_args(argv + optind + 1, afl->fsrv.out_file,
                          &afl->fsrv.use_stdin);
 
-        setup_stdio_file(afl);
         break;
 
       }

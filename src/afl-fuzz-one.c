@@ -3419,6 +3419,9 @@ fsfuzz_stage:
   /** 
   * havoc
   */
+  if (!afl->fsfuzz_mode)
+    goto ret;
+  
 
   afl->stage_name = "fs-havoc-mutate";
   afl->stage_short = "fs-havoc-mutate";
