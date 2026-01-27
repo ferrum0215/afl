@@ -672,7 +672,7 @@ int main(int argc, char **argv_orig, char **envp) {
   gettimeofday(&tv, &tz);
   rand_set_seed(afl, tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  afl->shmem_testcase_mode = 0;  // we always try to perform shmem fuzzing
+  afl->shmem_testcase_mode = 1;  // we always try to perform shmem fuzzing
 
   // still available: HjJkKqrv
   while (
