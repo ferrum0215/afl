@@ -117,6 +117,10 @@
 extern u64 time_spent_working;
 #endif
 
+struct time_shm *timer; /* Shm for time guide */
+static int time_shm_fd = -1;
+static char time_shm_name[128];
+
 static void at_exit() {
 
   s32   i, pid1 = 0, pid2 = 0, pgrp = -1;
@@ -164,6 +168,14 @@ static void at_exit() {
 
     i++;
 
+  }
+
+  /* Remove time_shm */
+  if (timer) {
+    munmap(timer, sizeof(*timer));
+    close(time_shm_fd);
+    shm_unlink(time_shm_name);
+    unsetenv("AFL_TIME_SHM_NAME");
   }
 
   int kill_signal = SIGKILL;
@@ -678,7 +690,7 @@ int main(int argc, char **argv_orig, char **envp) {
   while (
       (opt = getopt(argc, argv,
                     "+a:Ab:B:c:CdDe:E:f:F:g:G:hi:I:j:k:l:L:m:M:nNo:Op:P:Qr:Rs:S:t:T:"
-                    "uUV:w:WXx:YzZ")) > 0) {
+                    "uUvV:w:WXx:YzZ")) > 0) {
 
     switch (opt) {
 
@@ -693,6 +705,10 @@ int main(int argc, char **argv_orig, char **envp) {
 
       case 'k':
         afl->image_file = optarg;
+        break;
+
+      case 'v':
+        afl->time_guide = 1;
         break;
 
       case 'a':
@@ -2198,6 +2214,31 @@ int main(int argc, char **argv_orig, char **envp) {
     ck_free(seed_meta_fn);
   }
 
+  /* Add shm for time guiding */
+  if (afl->time_guide) {
+    snprintf(time_shm_name, sizeof(time_shm_name), "/afl_time_%d", getpid());
+
+    time_shm_fd = shm_open(time_shm_name, O_CREAT | O_EXCL | O_RDWR, 0600);
+    if (time_shm_fd < -1) {
+      PFATAL("Unable to open time_shm");
+    }
+
+    if (ftruncate(time_shm_fd, (off_t)sizeof(struct time_shm))) {
+      PFATAL("Ftruncate time_shm failed");
+    }
+
+    timer = (struct time_shm *)mmap(NULL, sizeof(*timer), PROT_READ | PROT_WRITE, MAP_SHARED, time_shm_fd, 0);
+    if (timer == MAP_FAILED) {
+      PFATAL("MMAP time_shm failed");
+    }
+
+    memset(timer, 0, sizeof(*timer));
+
+    if (setenv("AFL_TIME_SHM_NAME", time_shm_name, 1)) {
+      PFATAL("Setenv for time_shm failed");
+    }
+  }
+
   setup_dirs_fds(afl);
 
   #ifdef HAVE_AFFINITY
@@ -3000,6 +3041,7 @@ int main(int argc, char **argv_orig, char **envp) {
     if (likely(!afl->afl_env.afl_no_startup_calibration)) {
 
       perform_dry_run(afl);
+      afl->avg_time = afl->total_cal_us / afl->total_cal_cycles;
 
     } else {
 

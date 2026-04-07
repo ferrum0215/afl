@@ -45,6 +45,7 @@
 #include "sharedmem.h"
 #include "forkserver.h"
 #include "common.h"
+#include "time_shm.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -886,6 +887,9 @@ typedef struct afl_state {
   u8* syscall_dir;
   u32 fsfuzz_mode;
   u32 meta_size;
+
+  u32 time_guide; /* Time guiding mode */
+  u64 avg_time;   /* Average time for time guiding */
 
 #ifdef INTROSPECTION
   char  mutation[8072];

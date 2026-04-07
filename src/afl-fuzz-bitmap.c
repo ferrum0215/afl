@@ -29,6 +29,8 @@
 #include <stdlib.h>
 #include "asanfuzz.h"
 
+extern struct time_shm *timer;
+
 u16 count_class_lookup16[65536];
 
 /* Destructively simplify trace by eliminating hit count information
@@ -556,6 +558,7 @@ u8 __attribute__((hot)) save_if_interesting(afl_state_t *afl, void *mem,
   u8  san_fault = 0, san_idx = 0, feed_san = 0;
   s32 fd;
   u32 cksum_simplified = 0, cksum_unique = 0;
+  u64 run_ns = afl->time_guide ? atomic_load_explicit(&timer->value, memory_order_acquire) : 0;
 
   bool classified = false, bits_counted = false, cksumed = false;
   u8   new_bits = 0;                       /* valid if bits_counted is true */
@@ -678,7 +681,8 @@ u8 __attribute__((hot)) save_if_interesting(afl_state_t *afl, void *mem,
        future fuzzing, etc. */
     calculate_new_bits_if_necessary(afl, &new_bits, &bits_counted, &classified);
 
-    if (likely(!new_bits)) {
+    /* Add entry according to exec time */
+    if (likely(!new_bits  && (!afl->avg_time || run_ns <= 2 * (afl->avg_time)))) {
 
       if (san_fault == FSRV_RUN_OK) {
 

@@ -114,6 +114,8 @@ void create_alias_table(afl_state_t *afl) {
     avg_bitmap_size /= active;
     avg_len /= active;
 
+    afl->avg_time = avg_exec_us;
+
     for (i = 0; i < n; i++) {
 
       struct queue_entry *q = afl->queue_buf[i];
@@ -132,50 +134,55 @@ void create_alias_table(afl_state_t *afl) {
 
           if (likely(afl->schedule < RARE)) {
 
-            double t = q->exec_us / avg_exec_us;
+            double t = q->exec_us - avg_exec_us;
 
-            if (likely(t < 0.1)) {
+            if (likely(t < -30000)) {
 
-              // nothing
+              weight *= 0.1;
 
-            } else if (likely(t <= 0.25)) {
+            } else if (likely(t <= -20000)) {
 
-              weight *= 0.95;
+              weight *= 0.25;
 
-            } else if (likely(t <= 0.5)) {
+            } else if (likely(t <= -10000)) {
 
-              // nothing
+              weight *= 0.5;
 
-            } else if (likely(t <= 0.75)) {
+            } else if (likely(t <= -5000)) {
 
-              weight *= 1.05;
+              weight *= 0.75;
 
-            } else if (likely(t <= 1.0)) {
+            } else if (likely(t <= 0)) {
 
-              weight *= 1.1;
+              weight *= 1.0;
 
-            } else if (likely(t < 1.25)) {
+            } else if (likely(t < 2500)) {
 
-              weight *= 0.2;  // WTF ??? makes no sense
+              weight *= 1.25;
 
-            } else if (likely(t <= 1.5)) {
+            } else if (likely(t <= 5000)) {
 
-              // nothing
+              weight *= 1.5;
 
-            } else if (likely(t <= 2.0)) {
+            } else if (likely(t <= 10000)) {
 
-              weight *= 1.1;
+              weight *= 2;
 
-            } else if (likely(t <= 2.5)) {
+            } else if (likely(t <= 20000)) {
 
-            } else if (likely(t <= 5.0)) {
+              weight *= 5;
 
-              weight *= 1.15;
+            } else if (likely(t <= 30000)) {
 
-            } else if (likely(t <= 20.0)) {
+              weight *= 10;
 
-              weight *= 1.1;
-              // else nothing
+            } else if (likely(t <= 40000)) {
+
+              weight *= 20;
+
+            } else {
+
+              weight *= 50;
 
             }
 

@@ -42,6 +42,8 @@
 u64 time_spent_working = 0;
 #endif
 
+extern struct time_shm *timer;
+
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update afl->fsrv->trace_bits. */
 
@@ -469,6 +471,7 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
   u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
      first_run = (q->exec_cksum == 0);
   u64 start_us, stop_us, diff_us;
+  u64 max_ns = 0, min_ns = 0, total_ns = 0, result_ns;
   s32 old_sc = afl->stage_cur, old_sm = afl->stage_max;
   u32 use_tmout = afl->fsrv.exec_tmout;
   u8 *old_sn = afl->stage_name;
@@ -578,6 +581,20 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
 
     fault = fuzz_run_target(afl, &afl->fsrv, use_tmout);
 
+    /* Add getting time_shm value */
+    if (afl->time_guide) {
+      result_ns = atomic_load_explicit(&timer->value, memory_order_acquire);
+      total_ns += result_ns;
+
+      if (result_ns > max_ns) {
+        max_ns = result_ns;
+      }
+
+      if (!min_ns || result_ns < min_ns) {
+        min_ns = result_ns;
+      }
+    }
+
     // update the time spend in calibration after each execution, as those may
     // be slow
     update_calibration_time(afl, &calibration_start_us);
@@ -655,20 +672,27 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
 
   }
 
-  if (unlikely(afl->fixed_seed)) {
+  if (afl->time_guide) {
+    diff_us = total_ns - max_ns - min_ns;
+    afl->total_cal_cycles += (afl->stage_max - 2);
+  }
+  else {
+    if (unlikely(afl->fixed_seed)) {
 
-    diff_us = (u64)(afl->fsrv.exec_tmout - 1) * (u64)afl->stage_max;
+      diff_us = (u64)(afl->fsrv.exec_tmout - 1) * (u64)afl->stage_max;
 
-  } else {
+    } else {
 
-    stop_us = get_cur_time_us();
-    diff_us = stop_us - start_us;
-    if (unlikely(!diff_us)) { ++diff_us; }
+      stop_us = get_cur_time_us();
+      diff_us = stop_us - start_us;
+      if (unlikely(!diff_us)) { ++diff_us; }
 
+    }
+
+    afl->total_cal_cycles += afl->stage_max;
   }
 
   afl->total_cal_us += diff_us;
-  afl->total_cal_cycles += afl->stage_max;
 
   /* OK, let's collect some stats about the performance of this test case.
      This is used for fuzzing air time calculations in calculate_score(). */
@@ -680,7 +704,7 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
 
   }
 
-  q->exec_us = diff_us / afl->stage_max;
+  q->exec_us = afl->time_guide ? diff_us / (afl->stage_max - 2) : diff_us / afl->stage_max;
   if (unlikely(!q->exec_us)) { q->exec_us = 1; }
 
   q->bitmap_size = count_bytes(afl, afl->fsrv.trace_bits);
